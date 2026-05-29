@@ -3,9 +3,10 @@ const Template = require('../models/Template');
 /**
  * Template Controller
  * Handles CRUD operations for offer letter templates
+ * All operations are scoped to the authenticated user
  */
 
-// Default templates to seed on first request
+// Default templates to seed for each new user
 const DEFAULT_TEMPLATES = [
   {
     name: 'Professional',
@@ -136,18 +137,30 @@ const DEFAULT_TEMPLATES = [
 ];
 
 /**
+ * Seed default templates for a user if none exist
+ */
+const seedDefaultTemplates = async (userId) => {
+  const existingCount = await Template.countDocuments({ userId });
+  if (existingCount > 0) return;
+
+  const templatesWithUser = DEFAULT_TEMPLATES.map((t) => ({
+    ...t,
+    userId,
+  }));
+
+  await Template.insertMany(templatesWithUser);
+};
+
+/**
  * GET /api/templates
- * Fetch all templates, seed defaults if none exist
+ * Fetch all templates for the current user
  */
 const getTemplates = async (req, res, next) => {
   try {
-    let templates = await Template.find().sort({ createdAt: -1 });
+    // Seed defaults if user has no templates yet
+    await seedDefaultTemplates(req.user._id);
 
-    // Seed default templates if none exist
-    if (templates.length === 0) {
-      templates = await Template.insertMany(DEFAULT_TEMPLATES);
-    }
-
+    const templates = await Template.find({ userId: req.user._id }).sort({ createdAt: -1 });
     res.json({ success: true, data: templates });
   } catch (error) {
     next(error);
@@ -156,17 +169,19 @@ const getTemplates = async (req, res, next) => {
 
 /**
  * POST /api/templates
- * Create a new template
+ * Create a new template for the current user
  */
 const createTemplate = async (req, res, next) => {
   try {
     const { name, subject, html, logoUrl } = req.body;
 
     const template = await Template.create({
+      userId: req.user._id,
       name,
       subject,
       html,
       logoUrl: logoUrl || '',
+      isDefault: false,
     });
 
     res.status(201).json({ success: true, data: template });
@@ -177,15 +192,15 @@ const createTemplate = async (req, res, next) => {
 
 /**
  * PUT /api/templates/:id
- * Update an existing template
+ * Update a template (must belong to current user)
  */
 const updateTemplate = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, subject, html, logoUrl } = req.body;
 
-    const template = await Template.findByIdAndUpdate(
-      id,
+    const template = await Template.findOneAndUpdate(
+      { _id: id, userId: req.user._id },
       { name, subject, html, logoUrl },
       { new: true, runValidators: true }
     );
@@ -202,10 +217,22 @@ const updateTemplate = async (req, res, next) => {
 
 /**
  * DELETE /api/templates/:id
+ * Delete a template (must belong to current user, cannot delete last template)
  */
 const deleteTemplate = async (req, res, next) => {
   try {
-    const template = await Template.findByIdAndDelete(req.params.id);
+    const count = await Template.countDocuments({ userId: req.user._id });
+    if (count <= 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete your last template.',
+      });
+    }
+
+    const template = await Template.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
 
     if (!template) {
       return res.status(404).json({ success: false, message: 'Template not found' });
@@ -217,4 +244,45 @@ const deleteTemplate = async (req, res, next) => {
   }
 };
 
-module.exports = { getTemplates, createTemplate, updateTemplate, deleteTemplate };
+/**
+ * POST /api/templates/:id/reset
+ * Reset a default template back to its original content
+ */
+const resetTemplate = async (req, res, next) => {
+  try {
+    const template = await Template.findOne({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
+
+    if (!template) {
+      return res.status(404).json({ success: false, message: 'Template not found' });
+    }
+
+    if (!template.isDefault) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only default templates can be reset.',
+      });
+    }
+
+    // Find the matching default template by name
+    const defaultTemplate = DEFAULT_TEMPLATES.find((d) => d.name === template.name);
+    if (!defaultTemplate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Original default template not found.',
+      });
+    }
+
+    template.html = defaultTemplate.html;
+    template.subject = defaultTemplate.subject;
+    await template.save();
+
+    res.json({ success: true, data: template });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getTemplates, createTemplate, updateTemplate, deleteTemplate, resetTemplate };

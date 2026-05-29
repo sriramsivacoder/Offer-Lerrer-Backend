@@ -14,10 +14,12 @@ const path = require('path');
 /**
  * POST /api/send-mails
  * Send offer letters to selected recipients
+ * Uses the SAME template HTML for email body and PDF generation
  */
 const sendMails = async (req, res, next) => {
   try {
     const { recipients, template, smtpConfig, logoUrl } = req.body;
+    const userId = req.user._id;
 
     if (!recipients || !recipients.length) {
       return res.status(400).json({ success: false, message: 'No recipients provided' });
@@ -66,6 +68,10 @@ const sendMails = async (req, res, next) => {
     const results = [];
     const fromAddress = `${smtpConfig.fromName || 'Offer Letter Dispatcher'} <${smtpConfig.user}>`;
 
+    // SINGLE SOURCE OF TRUTH: Use template.html from the request
+    // This is the same HTML that was displayed in the frontend editor
+    const sourceHtml = template.html;
+
     // Send emails one-by-one
     for (let i = 0; i < recipients.length; i++) {
       const recipient = recipients[i];
@@ -83,17 +89,17 @@ const sendMails = async (req, res, next) => {
         continue;
       }
 
-      // Replace placeholders in template
-      const personalizedHtml = replacePlaceholders(template.html, recipient);
+      // Replace placeholders using the SAME source HTML
+      const personalizedHtml = replacePlaceholders(sourceHtml, recipient);
       const personalizedSubject = replacePlaceholders(
         template.subject || 'Offer Letter',
         recipient
       );
 
-      // Generate PDF
+      // Generate PDF using the SAME source HTML
       let pdfBuffer;
       try {
-        pdfBuffer = await generateOfferLetterPDF(recipient, template.html, logoBuffer);
+        pdfBuffer = await generateOfferLetterPDF(recipient, sourceHtml, logoBuffer);
       } catch (pdfErr) {
         console.error(`PDF generation failed for ${recipientName}:`, pdfErr.message);
         results.push({
@@ -132,6 +138,7 @@ const sendMails = async (req, res, next) => {
 
       // Log email to database
       await EmailHistory.create({
+        userId,
         recipientName,
         recipientEmail,
         subject: personalizedSubject,

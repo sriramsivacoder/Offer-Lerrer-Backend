@@ -3,9 +3,17 @@ const mongoose = require('mongoose');
 /**
  * Template Schema
  * Stores offer letter email templates with HTML content
+ * Each template belongs to a specific user (userId)
+ * System defaults are cloned per user on first login
  */
 const templateSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: [true, 'Template name is required'],

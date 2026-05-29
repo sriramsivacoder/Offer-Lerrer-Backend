@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { protect } = require('../middleware/auth');
 const {
   handleLogoUpload,
   getLogos,
@@ -7,10 +8,10 @@ const {
   validateCSV,
 } = require('../controllers/uploadController');
 
-// Upload & CSV routes
-router.post('/upload-logo', handleLogoUpload);
-router.get('/logos', getLogos);
-router.get('/sample-csv', downloadSampleCSV);
-router.post('/upload-csv', validateCSV);
+// Upload & CSV routes (protected)
+router.post('/upload-logo', protect, handleLogoUpload);
+router.get('/logos', protect, getLogos);
+router.get('/sample-csv', protect, downloadSampleCSV);
+router.post('/upload-csv', protect, validateCSV);
 
 module.exports = router;
